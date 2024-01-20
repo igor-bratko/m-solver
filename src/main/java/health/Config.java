@@ -14,6 +14,7 @@ import org.springframework.web.reactive.function.server.ServerResponse;
 import reactor.core.publisher.Mono;
 
 import java.util.Base64;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import static java.nio.charset.StandardCharsets.UTF_8;
 import static java.util.Objects.nonNull;
@@ -21,11 +22,14 @@ import static java.util.Objects.nonNull;
 @Slf4j
 @Configuration
 public class Config {
+    private final AtomicInteger requestCounter = new AtomicInteger();
 
     @Bean
     public RouterFunction<ServerResponse> route(MagicSolver solver) {
         return RouterFunctions.route()
-                .GET("/{magic}", req -> handle(solver, req))
+                .GET("/magic/{magic}", req -> handle(solver, req))
+                .GET("/debug", req ->  ServerResponse.ok()
+                        .bodyValue(requestCounter.get()))
                 .build();
     }
 
@@ -45,6 +49,11 @@ public class Config {
                 sb.append(part);
             }
         }
+
+        if (sb.isEmpty()) {
+            throw new IllegalStateException("Result is empty");
+        }
+
         return new String(Base64.getDecoder().decode(sb.toString().getBytes()), UTF_8);
     }
 
@@ -55,8 +64,10 @@ public class Config {
     ) {
         WebClient webClient = webClientBuilder.baseUrl(url)
                 .filter((req, next) -> Mono.fromSupplier(System::currentTimeMillis)
-                        .flatMap(start -> next.exchange(req).doOnSuccess(resp -> log.debug(
-                                "END  {}  {}", resp.statusCode(), System.currentTimeMillis() - start))
+                        .flatMap(start -> next.exchange(req).doOnSuccess(resp -> {
+                                    requestCounter.incrementAndGet();
+                                    log.debug("END  {}  {}", resp.statusCode(), System.currentTimeMillis() - start);
+                                })
                         ))
                 .build();
         return new ApicoClient(webClient, om);
